@@ -1,3 +1,4 @@
+
 import { toast } from "@/components/ui/sonner";
 
 export interface Session {
@@ -5,6 +6,16 @@ export interface Session {
   username?: string;
   password?: string;
   token?: string;
+  user_info?: {
+    username: string;
+    password: string;
+    status: string;
+    exp_date: string;
+    active_cons: number;
+    max_connections: number;
+    created_at: string;
+    is_trial: number;
+  };
 }
 
 // Function to save session data to localStorage
@@ -23,6 +34,11 @@ export const clearSession = () => {
   localStorage.removeItem("iptv_session");
 };
 
+// Function to log user out
+export const logoutUser = () => {
+  clearSession();
+};
+
 // Function to handle user login
 export const loginUser = async (credentials: Session): Promise<Session | null> => {
   try {
@@ -36,6 +52,7 @@ export const loginUser = async (credentials: Session): Promise<Session | null> =
         server: credentials.server,
         username: credentials.username,
         token: data.user_info.token,
+        user_info: data.user_info
       };
       saveSession(session);
       return session;
@@ -109,4 +126,98 @@ export const fetchData = async (endpoint: string) => {
     toast.error("Failed to fetch data. Please check your connection and server URL.");
     return null;
   }
+};
+
+// Function to get live TV categories
+export const getLiveCategories = async () => {
+  const session = getSession();
+  if (!session || !session.username) return [];
+  
+  const endpoint = `player_api.php?username=${session.username}&password=${session.password}&action=get_live_categories`;
+  const data = await fetchData(endpoint);
+  
+  return data || [];
+};
+
+// Function to get live TV channels (optionally by category)
+export const getLiveChannels = async (categoryId?: string) => {
+  const session = getSession();
+  if (!session || !session.username) return [];
+  
+  let endpoint = `player_api.php?username=${session.username}&password=${session.password}&action=get_live_streams`;
+  
+  if (categoryId) {
+    endpoint += `&category_id=${categoryId}`;
+  }
+  
+  const data = await fetchData(endpoint);
+  return data || [];
+};
+
+// Function to get live stream URL
+export const getLiveStreamUrl = (streamId: string) => {
+  const session = getSession();
+  if (!session || !session.username) return '';
+  
+  return `${session.server}/live/${session.username}/${session.password}/${streamId}.m3u8`;
+};
+
+// Function to get movie categories
+export const getMovieCategories = async () => {
+  const session = getSession();
+  if (!session || !session.username) return [];
+  
+  const endpoint = `player_api.php?username=${session.username}&password=${session.password}&action=get_vod_categories`;
+  const data = await fetchData(endpoint);
+  
+  return data || [];
+};
+
+// Function to get movies (optionally by category)
+export const getMovies = async (categoryId?: string) => {
+  const session = getSession();
+  if (!session || !session.username) return [];
+  
+  let endpoint = `player_api.php?username=${session.username}&password=${session.password}&action=get_vod_streams`;
+  
+  if (categoryId) {
+    endpoint += `&category_id=${categoryId}`;
+  }
+  
+  const data = await fetchData(endpoint);
+  return data || [];
+};
+
+// Function to get movie stream URL
+export const getMovieStreamUrl = (streamId: string) => {
+  const session = getSession();
+  if (!session || !session.username) return '';
+  
+  return `${session.server}/movie/${session.username}/${session.password}/${streamId}.mp4`;
+};
+
+// Function to get series categories
+export const getSeriesCategories = async () => {
+  const session = getSession();
+  if (!session || !session.username) return [];
+  
+  const endpoint = `player_api.php?username=${session.username}&password=${session.password}&action=get_series_categories`;
+  const data = await fetchData(endpoint);
+  
+  return data || [];
+};
+
+// Function to get series (optionally by category)
+export const getSeries = async (categoryId?: string) => {
+  const session = getSession();
+  if (!session || !session.username) return [];
+  
+  let endpoint = `player_api.php?username=${session.username}&password=${session.password}&action=get_series`;
+  
+  if (categoryId) {
+    endpoint += `&category_id=${categoryId}`;
+  }
+  
+  const data = await fetchData(endpoint);
+  return data || [];
 };
