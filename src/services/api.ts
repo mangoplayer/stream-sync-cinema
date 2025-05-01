@@ -15,6 +15,7 @@ import {
 let API_BASE_URL = '';
 let API_USERNAME = '';
 let API_PASSWORD = '';
+let USE_PROXY = true; // Flag to determine if we should use a proxy for requests
 
 // Helper to handle API errors
 const handleApiError = (error: any, message = "An error occurred") => {
@@ -36,35 +37,81 @@ const formatServerUrl = (url: string): string => {
   return url;
 };
 
+// Helper function to create API URLs with optional proxy support
+const getApiUrl = (endpoint: string): string => {
+  if (USE_PROXY) {
+    // For proxied requests, we need to include the full URL as a query parameter
+    const targetUrl = `${API_BASE_URL}${endpoint}`;
+    return `/api/proxy?url=${encodeURIComponent(targetUrl)}`;
+  } else {
+    // Direct request to the API server
+    return `${API_BASE_URL}${endpoint}`;
+  }
+};
+
 export const loginUser = async (credentials: LoginCredentials): Promise<UserSession | null> => {
   try {
     // Format server URL
     API_BASE_URL = formatServerUrl(credentials.server);
     API_USERNAME = credentials.username;
     API_PASSWORD = credentials.password;
-
-    const response = await fetch(`${API_BASE_URL}/player_api.php?username=${credentials.username}&password=${credentials.password}`);
     
-    if (!response.ok) {
-      throw new Error(`Login failed with status: ${response.status}`);
-    }
-    
-    const data = await response.json();
-    
-    if (data.user_info && data.user_info.auth === 1) {
-      // Save the session to localStorage
-      const session: UserSession = {
-        user_info: data.user_info,
-        server_info: data.server_info,
-        token: btoa(`${credentials.username}:${credentials.password}`)
-      };
+    // For login, we'll test if we can directly access the API or if we need to use a proxy
+    try {
+      // First try direct access
+      USE_PROXY = false;
+      const directResponse = await fetch(`${API_BASE_URL}/player_api.php?username=${credentials.username}&password=${credentials.password}`);
       
-      localStorage.setItem('iptv_session', JSON.stringify(session));
-      return session;
-    } else {
-      toast.error("Authentication failed. Please check your credentials.");
-      return null;
+      if (!directResponse.ok) {
+        throw new Error(`Login failed with status: ${directResponse.status}`);
+      }
+      
+      const data = await directResponse.json();
+      console.log("Direct API access successful");
+      
+      if (data.user_info && data.user_info.auth === 1) {
+        // Save the session to localStorage
+        const session: UserSession = {
+          user_info: data.user_info,
+          server_info: data.server_info,
+          token: btoa(`${credentials.username}:${credentials.password}`)
+        };
+        
+        localStorage.setItem('iptv_session', JSON.stringify(session));
+        return session;
+      }
+    } catch (error) {
+      console.log("Direct API access failed, trying proxy...", error);
+      // If direct access fails, enable proxy for subsequent requests
+      USE_PROXY = true;
+      
+      // Try with proxy
+      const proxyUrl = `/api/proxy?url=${encodeURIComponent(`${API_BASE_URL}/player_api.php?username=${credentials.username}&password=${credentials.password}`)}`;
+      
+      const proxyResponse = await fetch(proxyUrl);
+      
+      if (!proxyResponse.ok) {
+        throw new Error(`Login via proxy failed with status: ${proxyResponse.status}`);
+      }
+      
+      const proxyData = await proxyResponse.json();
+      
+      if (proxyData.user_info && proxyData.user_info.auth === 1) {
+        // Save the session to localStorage
+        const session: UserSession = {
+          user_info: proxyData.user_info,
+          server_info: proxyData.server_info,
+          token: btoa(`${credentials.username}:${credentials.password}`)
+        };
+        
+        localStorage.setItem('iptv_session', JSON.stringify(session));
+        localStorage.setItem('iptv_use_proxy', 'true'); // Remember proxy preference
+        return session;
+      }
     }
+    
+    toast.error("Authentication failed. Please check your credentials.");
+    return null;
   } catch (error) {
     return handleApiError(error, "Login failed. Please check your server URL and credentials.");
   }
@@ -83,6 +130,9 @@ export const getSession = (): UserSession | null => {
     API_PASSWORD = credentials[1];
     API_BASE_URL = formatServerUrl(session.server_info.url);
     
+    // Restore proxy preference
+    USE_PROXY = localStorage.getItem('iptv_use_proxy') === 'true';
+    
     return session;
   } catch {
     return null;
@@ -91,6 +141,7 @@ export const getSession = (): UserSession | null => {
 
 export const logoutUser = () => {
   localStorage.removeItem('iptv_session');
+  localStorage.removeItem('iptv_use_proxy');
   API_BASE_URL = '';
   API_USERNAME = '';
   API_PASSWORD = '';
@@ -102,7 +153,8 @@ export const getLiveCategories = async (): Promise<Category[]> => {
     const session = getSession();
     if (!session) throw new Error("Not logged in");
     
-    const response = await fetch(`${API_BASE_URL}/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_live_categories`);
+    const endpoint = `/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_live_categories`;
+    const response = await fetch(getApiUrl(endpoint));
     
     if (!response.ok) {
       throw new Error(`Failed to fetch live categories with status: ${response.status}`);
@@ -119,12 +171,12 @@ export const getLiveChannels = async (categoryId?: string): Promise<LiveChannel[
     const session = getSession();
     if (!session) throw new Error("Not logged in");
     
-    let url = `${API_BASE_URL}/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_live_streams`;
+    let endpoint = `/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_live_streams`;
     if (categoryId) {
-      url += `&category_id=${categoryId}`;
+      endpoint += `&category_id=${categoryId}`;
     }
     
-    const response = await fetch(url);
+    const response = await fetch(getApiUrl(endpoint));
     
     if (!response.ok) {
       throw new Error(`Failed to fetch live channels with status: ${response.status}`);
@@ -137,6 +189,10 @@ export const getLiveChannels = async (categoryId?: string): Promise<LiveChannel[
 };
 
 export const getLiveStreamUrl = (streamId: number): string => {
+  if (USE_PROXY) {
+    const originalUrl = `${API_BASE_URL}/live/${API_USERNAME}/${API_PASSWORD}/${streamId}.m3u8`;
+    return `/api/proxy?url=${encodeURIComponent(originalUrl)}`;
+  }
   return `${API_BASE_URL}/live/${API_USERNAME}/${API_PASSWORD}/${streamId}.m3u8`;
 };
 
@@ -146,7 +202,8 @@ export const getMovieCategories = async (): Promise<Category[]> => {
     const session = getSession();
     if (!session) throw new Error("Not logged in");
     
-    const response = await fetch(`${API_BASE_URL}/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_vod_categories`);
+    const endpoint = `/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_vod_categories`;
+    const response = await fetch(getApiUrl(endpoint));
     
     if (!response.ok) {
       throw new Error(`Failed to fetch movie categories with status: ${response.status}`);
@@ -163,12 +220,12 @@ export const getMovies = async (categoryId?: string): Promise<Movie[]> => {
     const session = getSession();
     if (!session) throw new Error("Not logged in");
     
-    let url = `${API_BASE_URL}/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_vod_streams`;
+    let endpoint = `/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_vod_streams`;
     if (categoryId) {
-      url += `&category_id=${categoryId}`;
+      endpoint += `&category_id=${categoryId}`;
     }
     
-    const response = await fetch(url);
+    const response = await fetch(getApiUrl(endpoint));
     
     if (!response.ok) {
       throw new Error(`Failed to fetch movies with status: ${response.status}`);
@@ -181,6 +238,10 @@ export const getMovies = async (categoryId?: string): Promise<Movie[]> => {
 };
 
 export const getMovieStreamUrl = (streamId: number): string => {
+  if (USE_PROXY) {
+    const originalUrl = `${API_BASE_URL}/movie/${API_USERNAME}/${API_PASSWORD}/${streamId}.mp4`;
+    return `/api/proxy?url=${encodeURIComponent(originalUrl)}`;
+  }
   return `${API_BASE_URL}/movie/${API_USERNAME}/${API_PASSWORD}/${streamId}.mp4`;
 };
 
@@ -190,7 +251,8 @@ export const getSeriesCategories = async (): Promise<Category[]> => {
     const session = getSession();
     if (!session) throw new Error("Not logged in");
     
-    const response = await fetch(`${API_BASE_URL}/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_series_categories`);
+    const endpoint = `/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_series_categories`;
+    const response = await fetch(getApiUrl(endpoint));
     
     if (!response.ok) {
       throw new Error(`Failed to fetch series categories with status: ${response.status}`);
@@ -207,12 +269,12 @@ export const getSeries = async (categoryId?: string): Promise<Series[]> => {
     const session = getSession();
     if (!session) throw new Error("Not logged in");
     
-    let url = `${API_BASE_URL}/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_series`;
+    let endpoint = `/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_series`;
     if (categoryId) {
-      url += `&category_id=${categoryId}`;
+      endpoint += `&category_id=${categoryId}`;
     }
     
-    const response = await fetch(url);
+    const response = await fetch(getApiUrl(endpoint));
     
     if (!response.ok) {
       throw new Error(`Failed to fetch series with status: ${response.status}`);
@@ -229,7 +291,8 @@ export const getSeriesInfo = async (seriesId: number): Promise<{ info: Series, s
     const session = getSession();
     if (!session) throw new Error("Not logged in");
     
-    const response = await fetch(`${API_BASE_URL}/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_series_info&series_id=${seriesId}`);
+    const endpoint = `/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_series_info&series_id=${seriesId}`;
+    const response = await fetch(getApiUrl(endpoint));
     
     if (!response.ok) {
       throw new Error(`Failed to fetch series info with status: ${response.status}`);
@@ -246,9 +309,8 @@ export const getEpisodes = async (seriesId: number, seasonNumber: number): Promi
     const session = getSession();
     if (!session) throw new Error("Not logged in");
     
-    const response = await fetch(
-      `${API_BASE_URL}/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_episodes&series_id=${seriesId}&season=${seasonNumber}`
-    );
+    const endpoint = `/player_api.php?username=${API_USERNAME}&password=${API_PASSWORD}&action=get_episodes&series_id=${seriesId}&season=${seasonNumber}`;
+    const response = await fetch(getApiUrl(endpoint));
     
     if (!response.ok) {
       throw new Error(`Failed to fetch episodes with status: ${response.status}`);
@@ -261,6 +323,10 @@ export const getEpisodes = async (seriesId: number, seasonNumber: number): Promi
 };
 
 export const getEpisodeStreamUrl = (seriesId: number, episodeId: string): string => {
+  if (USE_PROXY) {
+    const originalUrl = `${API_BASE_URL}/series/${API_USERNAME}/${API_PASSWORD}/${episodeId}.mp4`;
+    return `/api/proxy?url=${encodeURIComponent(originalUrl)}`;
+  }
   return `${API_BASE_URL}/series/${API_USERNAME}/${API_PASSWORD}/${episodeId}.mp4`;
 };
 
