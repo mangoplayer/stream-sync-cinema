@@ -2,10 +2,11 @@
 import React, { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "./Navbar";
-import { getSession } from "@/services/api";
+import { getSession, clearSession } from "@/services/api";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { AlertCircle } from "lucide-react";
+import { toast } from "@/components/ui/sonner";
 
 interface MainLayoutProps {
   children: React.ReactNode;
@@ -14,28 +15,40 @@ interface MainLayoutProps {
 
 const MainLayout: React.FC<MainLayoutProps> = ({ children, requireAuth = true }) => {
   const navigate = useNavigate();
-  const session = getSession();
+  const [session, setSession] = useState(getSession());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Check if session exists and is valid
+    const currentSession = getSession();
+    setSession(currentSession);
+
     // If authentication is required but user is not logged in, redirect to login
-    if (requireAuth && !session) {
+    if (requireAuth && !currentSession) {
       console.log("No session found, redirecting to login");
+      toast.error("Please log in to continue");
       navigate("/login");
       return;
     }
 
     // Verify session has required fields
-    if (requireAuth && session) {
-      if (!session.username || !session.password) {
+    if (requireAuth && currentSession) {
+      if (!currentSession.username || !currentSession.password) {
         console.error("Session is missing username or password");
         setError("Invalid session data. Please log in again.");
       }
+      
+      // Check for server URL format
+      if (!currentSession.server || !currentSession.server.startsWith('http')) {
+        console.error("Invalid server URL format in session");
+        setError("Invalid server URL in session. Please log in again.");
+      }
     }
-  }, [requireAuth, session, navigate]);
+  }, [requireAuth, navigate]);
 
   const handleLogout = () => {
-    localStorage.removeItem("iptv_session");
+    clearSession();
+    toast.success("You have been logged out");
     navigate("/login");
   };
 

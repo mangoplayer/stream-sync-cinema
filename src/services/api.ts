@@ -56,6 +56,17 @@ export const loginUser = async (credentials: LoginCredentials): Promise<UserSess
     const response = await fetch(url);
     console.log("Login response status:", response.status);
     
+    // Check if the response is valid JSON
+    const contentType = response.headers.get("content-type");
+    if (!contentType || !contentType.includes("application/json")) {
+      console.error("Server did not return JSON data:", contentType);
+      toast.error("Server did not return valid data. Please check the URL and credentials.");
+      // Enable proxy automatically for future requests
+      localStorage.setItem('iptv_cors_error', 'true');
+      localStorage.setItem('iptv_use_proxy', 'true');
+      return null;
+    }
+    
     const data = await response.json();
     console.log("Login response data:", data);
 
@@ -133,7 +144,22 @@ export function handleApiError(error: unknown): void {
     console.log('Possible CORS error, enabling proxy for future requests');
     localStorage.setItem('iptv_cors_error', 'true');
     localStorage.setItem('iptv_use_proxy', 'true');
+    toast.info("CORS issue detected. Enabled proxy mode for next requests.");
+  } else if (error instanceof SyntaxError && error.message.includes('Unexpected token')) {
+    console.log('Server returned non-JSON response, enabling proxy for future requests');
+    localStorage.setItem('iptv_use_proxy', 'true');
+    toast.info("Server returned invalid data. Enabled proxy mode for next requests.");
   }
+}
+
+// Function to validate JSON response
+const isValidJsonResponse = async (response: Response): Promise<boolean> => {
+  const contentType = response.headers.get("content-type");
+  if (!contentType || !contentType.includes("application/json")) {
+    console.error("Server did not return JSON data:", contentType);
+    return false;
+  }
+  return true;
 }
 
 // Function to fetch data from the API
@@ -164,12 +190,35 @@ export const fetchData = async (endpoint: string) => {
       throw new Error(`HTTP error! status: ${response.status}`);
     }
     
+    // Verify we got a valid JSON response
+    if (!await isValidJsonResponse(response)) {
+      // If not valid JSON, try with proxy if not already using it
+      if (!shouldUseProxy()) {
+        localStorage.setItem('iptv_use_proxy', 'true');
+        toast.info("Server returned invalid data. Retrying with proxy...");
+        
+        // Try again with proxy
+        return fetchData(endpoint);
+      } else {
+        toast.error("Server returned invalid data even with proxy. Please check your server URL.");
+        return null;
+      }
+    }
+    
     const data = await response.json();
     console.log("API response data:", data);
     return data;
   } catch (error) {
     console.error("API fetch error:", error);
     handleApiError(error);
+    
+    // If not already using proxy, retry with proxy
+    if (!shouldUseProxy() && error instanceof SyntaxError && error.message.includes('Unexpected token')) {
+      localStorage.setItem('iptv_use_proxy', 'true');
+      toast.info("Retrying with proxy...");
+      return fetchData(endpoint);
+    }
+    
     toast.error("Failed to fetch data. Please check your connection and server URL.");
     return null;
   }
