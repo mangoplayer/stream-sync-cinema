@@ -6,6 +6,7 @@ import ContentCard from "@/components/ui/ContentCard";
 import { Button } from "@/components/ui/button";
 import { Category, LiveChannel } from "@/types";
 import { getLiveCategories, getLiveChannels, getLiveStreamUrl } from "@/services/api";
+import { toast } from "@/components/ui/sonner";
 
 const LiveTV = () => {
   const navigate = useNavigate();
@@ -13,11 +14,22 @@ const LiveTV = () => {
   const [channels, setChannels] = useState<LiveChannel[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
   useEffect(() => {
     const loadCategories = async () => {
       try {
+        console.log("Fetching live TV categories...");
         const categoriesData = await getLiveCategories();
+        console.log("Live TV categories received:", categoriesData);
+        
+        if (!categoriesData || categoriesData.length === 0) {
+          console.log("No live TV categories found");
+          setError("No categories found. Please check your connection.");
+          setLoading(false);
+          return;
+        }
+        
         setCategories(categoriesData);
         
         // Select the first category by default if there are categories
@@ -26,6 +38,9 @@ const LiveTV = () => {
         }
       } catch (error) {
         console.error("Error loading categories:", error);
+        setError("Failed to load categories. Please check your connection.");
+        toast.error("Failed to load categories");
+        setLoading(false);
       }
     };
     
@@ -37,12 +52,23 @@ const LiveTV = () => {
       if (!selectedCategory) return;
       
       setLoading(true);
+      setError(null);
       
       try {
+        console.log("Fetching channels for category:", selectedCategory);
         const channelsData = await getLiveChannels(selectedCategory);
-        setChannels(channelsData);
+        console.log("Channels data received:", channelsData);
+        
+        if (!channelsData || channelsData.length === 0) {
+          console.log("No channels found in this category");
+          setChannels([]);
+        } else {
+          setChannels(channelsData);
+        }
       } catch (error) {
         console.error("Error loading channels:", error);
+        setError("Failed to load channels. Please check your connection.");
+        toast.error("Failed to load channels");
       } finally {
         setLoading(false);
       }
@@ -56,13 +82,23 @@ const LiveTV = () => {
   };
   
   const handleChannelClick = (channel: LiveChannel) => {
-    navigate(`/player?src=${encodeURIComponent(getLiveStreamUrl(channel.stream_id))}&title=${encodeURIComponent(channel.name)}`);
+    const streamUrl = getLiveStreamUrl(channel.stream_id);
+    console.log("Opening stream:", streamUrl);
+    navigate(`/player?src=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(channel.name)}`);
   };
   
   return (
     <MainLayout>
       <div className="py-8">
         <h1 className="text-3xl font-bold mb-6">Live TV</h1>
+        
+        {/* Debug information */}
+        <div className="mb-4 p-2 bg-yellow-100/10 rounded border border-yellow-300/30 text-yellow-300 text-sm">
+          <div>Session status: {localStorage.getItem('iptv_session') ? 'Active' : 'Not found'}</div>
+          <div>Categories loaded: {categories.length}</div>
+          <div>Selected category: {selectedCategory || 'None'}</div>
+          <div>Channels loaded: {channels.length}</div>
+        </div>
         
         {/* Categories filter */}
         <div className="mb-8 overflow-x-auto scrollbar-none">
@@ -82,6 +118,14 @@ const LiveTV = () => {
           </div>
         </div>
         
+        {/* Error state */}
+        {error && (
+          <div className="text-center py-8">
+            <p className="text-red-400 mb-2">{error}</p>
+            <Button onClick={() => window.location.reload()}>Retry</Button>
+          </div>
+        )}
+        
         {/* Channels grid */}
         {loading ? (
           <div className="flex justify-center py-12">
@@ -99,11 +143,11 @@ const LiveTV = () => {
               />
             ))}
           </div>
-        ) : (
+        ) : !error ? (
           <div className="text-center py-12">
             <p className="text-gray-400">No channels found in this category.</p>
           </div>
-        )}
+        ) : null}
       </div>
     </MainLayout>
   );

@@ -6,6 +6,7 @@ import ContentCard from "@/components/ui/ContentCard";
 import { Button } from "@/components/ui/button";
 import { Category, Movie } from "@/types";
 import { getMovieCategories, getMovies, getMovieStreamUrl } from "@/services/api";
+import { toast } from "@/components/ui/sonner";
 
 const Movies = () => {
   const navigate = useNavigate();
@@ -13,11 +14,22 @@ const Movies = () => {
   const [movies, setMovies] = useState<Movie[]>([]);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
   
   useEffect(() => {
     const loadCategories = async () => {
       try {
+        console.log("Fetching movie categories...");
         const categoriesData = await getMovieCategories();
+        console.log("Movie categories received:", categoriesData);
+        
+        if (!categoriesData || categoriesData.length === 0) {
+          console.log("No movie categories found");
+          setError("No categories found. Please check your connection.");
+          setLoading(false);
+          return;
+        }
+        
         setCategories(categoriesData);
         
         // Select the first category by default if there are categories
@@ -26,6 +38,9 @@ const Movies = () => {
         }
       } catch (error) {
         console.error("Error loading categories:", error);
+        setError("Failed to load categories. Please check your connection.");
+        toast.error("Failed to load categories");
+        setLoading(false);
       }
     };
     
@@ -37,12 +52,23 @@ const Movies = () => {
       if (!selectedCategory) return;
       
       setLoading(true);
+      setError(null);
       
       try {
+        console.log("Fetching movies for category:", selectedCategory);
         const moviesData = await getMovies(selectedCategory);
-        setMovies(moviesData);
+        console.log("Movies data received:", moviesData);
+        
+        if (!moviesData || moviesData.length === 0) {
+          console.log("No movies found in this category");
+          setMovies([]);
+        } else {
+          setMovies(moviesData);
+        }
       } catch (error) {
         console.error("Error loading movies:", error);
+        setError("Failed to load movies. Please check your connection.");
+        toast.error("Failed to load movies");
       } finally {
         setLoading(false);
       }
@@ -56,13 +82,23 @@ const Movies = () => {
   };
   
   const handleMovieClick = (movie: Movie) => {
-    navigate(`/player?src=${encodeURIComponent(getMovieStreamUrl(movie.stream_id))}&title=${encodeURIComponent(movie.name)}`);
+    const streamUrl = getMovieStreamUrl(movie.stream_id);
+    console.log("Opening movie stream:", streamUrl);
+    navigate(`/player?src=${encodeURIComponent(streamUrl)}&title=${encodeURIComponent(movie.name)}`);
   };
   
   return (
     <MainLayout>
       <div className="py-8">
         <h1 className="text-3xl font-bold mb-6">Movies</h1>
+        
+        {/* Debug information */}
+        <div className="mb-4 p-2 bg-yellow-100/10 rounded border border-yellow-300/30 text-yellow-300 text-sm">
+          <div>Session status: {localStorage.getItem('iptv_session') ? 'Active' : 'Not found'}</div>
+          <div>Categories loaded: {categories.length}</div>
+          <div>Selected category: {selectedCategory || 'None'}</div>
+          <div>Movies loaded: {movies.length}</div>
+        </div>
         
         {/* Categories filter */}
         <div className="mb-8 overflow-x-auto scrollbar-none">
@@ -82,6 +118,14 @@ const Movies = () => {
           </div>
         </div>
         
+        {/* Error state */}
+        {error && (
+          <div className="text-center py-8">
+            <p className="text-red-400 mb-2">{error}</p>
+            <Button onClick={() => window.location.reload()}>Retry</Button>
+          </div>
+        )}
+        
         {/* Movies grid */}
         {loading ? (
           <div className="flex justify-center py-12">
@@ -99,11 +143,11 @@ const Movies = () => {
               />
             ))}
           </div>
-        ) : (
+        ) : !error ? (
           <div className="text-center py-12">
             <p className="text-gray-400">No movies found in this category.</p>
           </div>
-        )}
+        ) : null}
       </div>
     </MainLayout>
   );

@@ -1,5 +1,6 @@
 
 import { toast } from "@/components/ui/sonner";
+import { LoginCredentials, UserSession } from "@/types";
 
 export interface Session {
   server: string;
@@ -40,29 +41,64 @@ export const logoutUser = () => {
 };
 
 // Function to handle user login
-export const loginUser = async (credentials: Session): Promise<Session | null> => {
+export const loginUser = async (credentials: LoginCredentials): Promise<UserSession | null> => {
+  console.log("Attempting login with:", { 
+    server: credentials.server,
+    username: credentials.username,
+    // password is hidden for security
+  });
+  
   try {
     // Make API call to authenticate user
-    const response = await fetch(`${credentials.server}/player_api.php?username=${credentials.username}&password=${credentials.password}&action=get_player_info`);
+    const url = `${credentials.server}/player_api.php?username=${credentials.username}&password=${credentials.password}`;
+    console.log("Login URL:", url);
+    
+    const response = await fetch(url);
+    console.log("Login response status:", response.status);
+    
     const data = await response.json();
+    console.log("Login response data:", data);
 
     if (data.user_info) {
+      console.log("Login successful");
       // Save session data to localStorage
       const session: Session = {
         server: credentials.server,
         username: credentials.username,
+        password: credentials.password, // Store password for API calls
         token: data.user_info.token,
         user_info: data.user_info
       };
       saveSession(session);
-      return session;
+      
+      // Also enable proxy if CORS is enabled
+      if (localStorage.getItem('iptv_use_proxy') === 'true') {
+        console.log("Using proxy for API calls");
+      }
+      
+      // Return the user session data
+      return {
+        user_info: data.user_info,
+        server_info: data.server_info,
+        token: data.user_info.token || ''
+      };
     } else {
-      toast.error("Invalid credentials");
+      console.log("Login failed - invalid credentials or server response");
+      toast.error("Invalid credentials or server response");
       return null;
     }
   } catch (error) {
     console.error("Login failed:", error);
     toast.error("Login failed. Please check your credentials and server URL.");
+    
+    // Check if it's a CORS error and enable proxy automatically
+    if (error instanceof TypeError && error.message.includes('fetch')) {
+      console.log("Possible CORS error detected, enabling proxy");
+      localStorage.setItem('iptv_cors_error', 'true');
+      localStorage.setItem('iptv_use_proxy', 'true');
+      toast.info("CORS issue detected. Enabled proxy mode for next attempt.");
+    }
+    
     return null;
   }
 };
@@ -105,23 +141,34 @@ export const fetchData = async (endpoint: string) => {
   try {
     const session = getSession();
     if (!session) {
+      console.error("Session not found. Please login again.");
       toast.error("Session not found. Please login again.");
       return null;
     }
 
+    console.log("Fetching data from endpoint:", endpoint);
+    
     const url = getApiUrl(endpoint);
     if (!url) {
+      console.error("Unable to construct API URL. Please check your session.");
       toast.error("Unable to construct API URL. Please check your session.");
       return null;
     }
 
+    console.log("Using URL:", url);
     const response = await fetch(url);
+    
     if (!response.ok) {
+      console.error("API error:", response.status, response.statusText);
       handleApiError(response.statusText);
       throw new Error(`HTTP error! status: ${response.status}`);
     }
-    return await response.json();
+    
+    const data = await response.json();
+    console.log("API response data:", data);
+    return data;
   } catch (error) {
+    console.error("API fetch error:", error);
     handleApiError(error);
     toast.error("Failed to fetch data. Please check your connection and server URL.");
     return null;
@@ -157,7 +204,10 @@ export const getLiveChannels = async (categoryId?: string) => {
 // Function to get live stream URL - Updated to accept number or string
 export const getLiveStreamUrl = (streamId: string | number) => {
   const session = getSession();
-  if (!session || !session.username) return '';
+  if (!session || !session.username || !session.password) {
+    console.error("Missing session data for stream URL");
+    return '';
+  }
   
   return `${session.server}/live/${session.username}/${session.password}/${streamId}.m3u8`;
 };
@@ -191,7 +241,10 @@ export const getMovies = async (categoryId?: string) => {
 // Function to get movie stream URL - Updated to accept number or string
 export const getMovieStreamUrl = (streamId: string | number) => {
   const session = getSession();
-  if (!session || !session.username) return '';
+  if (!session || !session.username || !session.password) {
+    console.error("Missing session data for stream URL");
+    return '';
+  }
   
   return `${session.server}/movie/${session.username}/${session.password}/${streamId}.mp4`;
 };
@@ -210,7 +263,10 @@ export const getSeriesCategories = async () => {
 // Function to get series (optionally by category)
 export const getSeries = async (categoryId?: string) => {
   const session = getSession();
-  if (!session || !session.username) return [];
+  if (!session || !session.username) {
+    console.error("Session not found or missing username");
+    return [];
+  }
   
   let endpoint = `player_api.php?username=${session.username}&password=${session.password}&action=get_series`;
   
@@ -220,4 +276,23 @@ export const getSeries = async (categoryId?: string) => {
   
   const data = await fetchData(endpoint);
   return data || [];
+};
+
+// Function to get series info by ID
+export const getSeriesInfo = async (seriesId: number | string) => {
+  const session = getSession();
+  if (!session || !session.username) return null;
+  
+  const endpoint = `player_api.php?username=${session.username}&password=${session.password}&action=get_series_info&series_id=${seriesId}`;
+  const data = await fetchData(endpoint);
+  
+  return data || null;
+};
+
+// Function to get series stream URL
+export const getEpisodeStreamUrl = (episodeId: string, containerExtension: string) => {
+  const session = getSession();
+  if (!session || !session.username || !session.password) return '';
+  
+  return `${session.server}/series/${session.username}/${session.password}/${episodeId}.${containerExtension}`;
 };
