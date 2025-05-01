@@ -17,11 +17,13 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children, requireAuth = true })
   const navigate = useNavigate();
   const [session, setSession] = useState(getSession());
   const [error, setError] = useState<string | null>(null);
+  const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     // Check if session exists and is valid
     const currentSession = getSession();
     setSession(currentSession);
+    setIsLoading(false);
 
     // If authentication is required but user is not logged in, redirect to login
     if (requireAuth && !currentSession) {
@@ -36,12 +38,14 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children, requireAuth = true })
       if (!currentSession.username || !currentSession.password) {
         console.error("Session is missing username or password");
         setError("Invalid session data. Please log in again.");
+        return;
       }
       
       // Check for server URL format
       if (!currentSession.server || !currentSession.server.startsWith('http')) {
         console.error("Invalid server URL format in session");
         setError("Invalid server URL in session. Please log in again.");
+        return;
       }
     }
   }, [requireAuth, navigate]);
@@ -51,6 +55,15 @@ const MainLayout: React.FC<MainLayoutProps> = ({ children, requireAuth = true })
     toast.success("You have been logged out");
     navigate("/login");
   };
+
+  // If still loading, show a loading indicator
+  if (isLoading) {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-streaming-blue to-black text-white flex items-center justify-center">
+        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-streaming-purple"></div>
+      </div>
+    );
+  }
 
   // If auth is required but no session, don't render anything (will redirect)
   if (requireAuth && !session) {

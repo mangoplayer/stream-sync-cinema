@@ -40,6 +40,18 @@ export const logoutUser = () => {
   clearSession();
 };
 
+// Direct fetch without using proxy
+const fetchWithoutProxy = async (url: string): Promise<Response> => {
+  return fetch(url);
+};
+
+// Fetch with proxy
+const fetchWithProxy = async (url: string): Promise<Response> => {
+  const proxyUrl = `/api/proxy?url=${encodeURIComponent(url)}`;
+  console.log('Using proxy URL:', proxyUrl);
+  return fetch(proxyUrl);
+};
+
 // Function to handle user login
 export const loginUser = async (credentials: LoginCredentials): Promise<UserSession | null> => {
   console.log("Attempting login with:", { 
@@ -53,24 +65,49 @@ export const loginUser = async (credentials: LoginCredentials): Promise<UserSess
     const url = `${credentials.server}/player_api.php?username=${credentials.username}&password=${credentials.password}`;
     console.log("Login URL:", url);
     
-    const response = await fetch(url);
+    // First try without proxy
+    let response = await fetchWithoutProxy(url);
+    let contentType = response.headers.get("content-type");
+    
+    // If CORS error or not JSON, try with proxy
+    if (!response.ok || !contentType || !contentType.includes("application/json")) {
+      console.log('First attempt failed or not JSON, trying with proxy...');
+      localStorage.setItem('iptv_use_proxy', 'true');
+      
+      // Try again with proxy
+      response = await fetchWithProxy(url);
+      contentType = response.headers.get("content-type");
+      
+      if (!contentType || !contentType.includes("application/json")) {
+        console.error("Server did not return JSON data:", contentType);
+        toast.error("Server did not return valid data. Please check the URL and credentials.");
+        return null;
+      }
+    }
+    
     console.log("Login response status:", response.status);
     
-    // Check if the response is valid JSON
-    const contentType = response.headers.get("content-type");
-    if (!contentType || !contentType.includes("application/json")) {
-      console.error("Server did not return JSON data:", contentType);
-      toast.error("Server did not return valid data. Please check the URL and credentials.");
-      // Enable proxy automatically for future requests
-      localStorage.setItem('iptv_cors_error', 'true');
-      localStorage.setItem('iptv_use_proxy', 'true');
+    // Safely parse JSON response
+    let data;
+    try {
+      const text = await response.text();
+      // Check if the response is valid JSON
+      try {
+        data = JSON.parse(text);
+      } catch (e) {
+        console.error("Invalid JSON response:", text.substring(0, 100) + "...");
+        toast.error("Server returned invalid JSON. Please check the server URL.");
+        return null;
+      }
+    } catch (e) {
+      console.error("Error reading response:", e);
+      toast.error("Error reading server response");
       return null;
     }
     
-    const data = await response.json();
     console.log("Login response data:", data);
 
-    if (data.user_info) {
+    if (data && data.user_info) {
       console.log("Login successful");
       // Save session data to localStorage
       const session: Session = {
@@ -82,7 +119,7 @@ export const loginUser = async (credentials: LoginCredentials): Promise<UserSess
       };
       saveSession(session);
       
-      // Also enable proxy if CORS is enabled
+      // Set proxy flag based on whether we needed it
       if (localStorage.getItem('iptv_use_proxy') === 'true') {
         console.log("Using proxy for API calls");
       }
@@ -152,17 +189,24 @@ export function handleApiError(error: unknown): void {
   }
 }
 
-// Function to validate JSON response
-const isValidJsonResponse = async (response: Response): Promise<boolean> => {
-  const contentType = response.headers.get("content-type");
-  if (!contentType || !contentType.includes("application/json")) {
-    console.error("Server did not return JSON data:", contentType);
-    return false;
+// Function to safely parse JSON response
+const safelyParseJson = async (response: Response): Promise<any> => {
+  try {
+    const text = await response.text();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      console.error('JSON parse error:', e);
+      console.error('Raw response:', text.substring(0, 200) + '...');
+      throw new SyntaxError('Invalid JSON response from server');
+    }
+  } catch (e) {
+    console.error('Error reading response:', e);
+    throw e;
   }
-  return true;
-}
+};
 
-// Function to fetch data from the API
+// Function to fetch data from the API with retry mechanism
 export const fetchData = async (endpoint: string) => {
   try {
     const session = getSession();
@@ -182,43 +226,39 @@ export const fetchData = async (endpoint: string) => {
     }
 
     console.log("Using URL:", url);
-    const response = await fetch(url);
     
-    if (!response.ok) {
-      console.error("API error:", response.status, response.statusText);
-      handleApiError(response.statusText);
-      throw new Error(`HTTP error! status: ${response.status}`);
-    }
-    
-    // Verify we got a valid JSON response
-    if (!await isValidJsonResponse(response)) {
-      // If not valid JSON, try with proxy if not already using it
-      if (!shouldUseProxy()) {
-        localStorage.setItem('iptv_use_proxy', 'true');
-        toast.info("Server returned invalid data. Retrying with proxy...");
-        
-        // Try again with proxy
-        return fetchData(endpoint);
-      } else {
-        toast.error("Server returned invalid data even with proxy. Please check your server URL.");
-        return null;
+    // First attempt
+    let response: Response;
+    try {
+      response = await fetch(url);
+      
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
+      
+      // Try to parse the response as JSON
+      return await safelyParseJson(response);
+    } catch (error) {
+      console.error("API fetch error:", error);
+      
+      // If we're not already using proxy and hit an error, try with proxy
+      if (!shouldUseProxy()) {
+        console.log("Retrying with proxy...");
+        localStorage.setItem('iptv_use_proxy', 'true');
+        toast.info("Encountered an error. Retrying with proxy...");
+        
+        // Recursive call with proxy enabled
+        return fetchData(endpoint);
+      }
+      
+      // If we're already using proxy or got an error with proxy, handle the error
+      handleApiError(error);
+      toast.error("Failed to fetch data. Please check your connection and server URL.");
+      return null;
     }
-    
-    const data = await response.json();
-    console.log("API response data:", data);
-    return data;
   } catch (error) {
     console.error("API fetch error:", error);
     handleApiError(error);
-    
-    // If not already using proxy, retry with proxy
-    if (!shouldUseProxy() && error instanceof SyntaxError && error.message.includes('Unexpected token')) {
-      localStorage.setItem('iptv_use_proxy', 'true');
-      toast.info("Retrying with proxy...");
-      return fetchData(endpoint);
-    }
-    
     toast.error("Failed to fetch data. Please check your connection and server URL.");
     return null;
   }
