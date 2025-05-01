@@ -154,8 +154,8 @@ export const getLiveChannels = async (categoryId?: string) => {
   return data || [];
 };
 
-// Function to get live stream URL
-export const getLiveStreamUrl = (streamId: string) => {
+// Function to get live stream URL - Updated to accept number or string
+export const getLiveStreamUrl = (streamId: string | number) => {
   const session = getSession();
   if (!session || !session.username) return '';
   
@@ -188,8 +188,8 @@ export const getMovies = async (categoryId?: string) => {
   return data || [];
 };
 
-// Function to get movie stream URL
-export const getMovieStreamUrl = (streamId: string) => {
+// Function to get movie stream URL - Updated to accept number or string
+export const getMovieStreamUrl = (streamId: string | number) => {
   const session = getSession();
   if (!session || !session.username) return '';
   

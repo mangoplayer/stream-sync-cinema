@@ -45,7 +45,7 @@ export interface Category {
 }
 
 export interface LiveChannel {
-  stream_id: number;
+  stream_id: number; // This is a number in the API response
   name: string;
   stream_type: string;
   stream_icon: string;
@@ -59,7 +59,7 @@ export interface LiveChannel {
 }
 
 export interface Movie {
-  stream_id: number;
+  stream_id: number; // This is a number in the API response
   name: string;
   added: string;
   category_id: string;
@@ -76,7 +76,7 @@ export interface Movie {
 }
 
 export interface Series {
-  series_id: number;
+  series_id: number; // This is a number in the API response
   name: string;
   cover: string;
   genre: string;
